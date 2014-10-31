@@ -7,9 +7,12 @@ import (
 	"github.com/spagettikod/sdb"
 	"os"
 	"strings"
+	"time"
 )
 
-var db *sdb.SimpleDB
+var (
+	db sdb.SimpleDB
+)
 
 func exit() {
 	os.Exit(0)
@@ -18,11 +21,13 @@ func exit() {
 func printHelp() {
 	fmt.Fprintln(os.Stdout, "")
 	fmt.Fprintln(os.Stdout, "COMMANDS")
-	fmt.Fprintln(os.Stdout, "  ls\t\tList all domains")
-	fmt.Fprintln(os.Stdout, "  c <name>\tCreate domain with name <name>")
-	fmt.Fprintln(os.Stdout, "  del <name>\tDelete domain with name <name>")
-	fmt.Fprintln(os.Stdout, "  select...\tCommand starting with select will be sent as a select query to SimpleDB")
-	fmt.Fprintln(os.Stdout, "  x\t\tExists the program")
+	fmt.Fprintln(os.Stdout, "  ls                      List all domains")
+	fmt.Fprintln(os.Stdout, "  create <domain>         Create domain with name <domain>")
+	fmt.Fprintln(os.Stdout, "  drop <domain>           Drop domain with name <domain>")
+	fmt.Fprintln(os.Stdout, "  meta <domain>           Get metadata for domain with name <domain>")
+	fmt.Fprintln(os.Stdout, "  delete <domain> <item>  Delete item with name <item> from domain named <domain>")
+	fmt.Fprintln(os.Stdout, "  select...               Command starting with \"select\" will be sent as a select query to SimpleDB")
+	fmt.Fprintln(os.Stdout, "  q                       Exists SimpleDB CLI")
 	fmt.Fprintln(os.Stdout, "")
 }
 
@@ -45,55 +50,112 @@ func listDomains() {
 func createDomain(name string) {
 	_, err := db.CreateDomain(name)
 	if err != nil {
-		if len(db.Error.Errors) > 0 {
-			for _, e := range db.Error.Errors {
-				fmt.Fprintf(os.Stdout, "%v: %v\n", e.Code, e.Message)
-			}
-		} else {
-			fmt.Fprintln(os.Stdout, err)
-		}
+		fmt.Fprintln(os.Stdout, err)
 		return
 	}
 	fmt.Fprintln(os.Stdout, "domain created")
 }
 
-func deleteDomain(name string) {
-	_, err := db.DeleteDomain(name)
+func metaDomain(name string) {
+	var r sdb.DomainMetadataResponse
+	r, err := db.DomainMetadata(name)
 	if err != nil {
-		if len(db.Error.Errors) > 0 {
-			for _, e := range db.Error.Errors {
-				fmt.Fprintf(os.Stdout, "%v: %v\n", e.Code, e.Message)
-			}
-		} else {
-			fmt.Fprintln(os.Stdout, err)
-		}
+		fmt.Fprintln(os.Stdout, err)
 		return
 	}
+	fmt.Fprintf(os.Stdout, "Metadata for domain '%v' at %v\n", name, time.Unix(r.Timestamp, 0))
+	fmt.Fprintf(os.Stdout, "   ItemCount = %v\n", r.ItemCount)
+	fmt.Fprintf(os.Stdout, "   ItemNamesSizeBytes = %v\n", r.ItemNamesSizeBytes)
+	fmt.Fprintf(os.Stdout, "   AttributeNameCount = %v\n", r.AttributeNameCount)
+	fmt.Fprintf(os.Stdout, "   AttributeValueCount = %v\n", r.AttributeValueCount)
+	fmt.Fprintf(os.Stdout, "   AttributeNamesSizeBytes = %v\n", r.AttributeNamesSizeBytes)
+	fmt.Fprintf(os.Stdout, "   AttributeValuesSizeBytes = %v\n", r.AttributeValuesSizeBytes)
+	fmt.Fprintf(os.Stdout, "   AttributeValuesSizeBytes = %v\n", r.AttributeValuesSizeBytes)
+}
+
+func dropDomain(name string) {
+	_, err := db.DeleteDomain(name)
+	if err != nil {
+		fmt.Fprintln(os.Stdout, err)
+	}
 	fmt.Fprintln(os.Stdout, "domain deleted")
+}
+
+func deleteItem(domain string, item string) {
+	_, err := db.DeleteItem(domain, item)
+	if err != nil {
+		fmt.Fprintln(os.Stdout, err)
+	}
+	fmt.Fprintln(os.Stdout, "item deleted")
+}
+
+type Column struct {
+	Name   string
+	MaxLen int
+}
+
+func attrlens(items []sdb.Item) (cols []Column) {
+	var idColName = "ItemName"
+	var j int = len(idColName)
+	for _, item := range items {
+		if len(item.Name) > j {
+			j = len(item.Name)
+		}
+	}
+	cols = append(cols, Column{Name: idColName, MaxLen: j})
+	for _, item := range items {
+		for i, attr := range item.Attributes {
+			offset := i + 1
+			if offset >= len(cols) {
+				cols = append(cols, Column{Name: attr.Name, MaxLen: 0})
+			}
+			if len(attr.Name) > cols[offset].MaxLen {
+				cols[offset].MaxLen = len(attr.Name)
+			}
+			if len(attr.Value) > cols[offset].MaxLen {
+				cols[offset].MaxLen = len(attr.Value)
+			}
+		}
+	}
+	return
+}
+
+func pad(s string, finalLength int, padstr string) string {
+	diff := finalLength - len(s)
+	if diff > 0 {
+		for j := 0; j < diff; j++ {
+			s = s + padstr
+		}
+	}
+	return s
 }
 
 func query(s string) {
 	r, err := db.Select(s)
 	if err != nil {
-		if len(db.Error.Errors) > 0 {
-			for _, e := range db.Error.Errors {
-				fmt.Fprintf(os.Stdout, "%v: %v\n", e.Code, e.Message)
-			}
-			fmt.Fprintf(os.Stdout, "%v\n", db.RawRequest)
-			fmt.Fprintf(os.Stdout, "%v\n", db.RawResponse)
-		} else {
-			fmt.Fprintln(os.Stdout, err)
-		}
+		fmt.Fprintln(os.Stdout, err)
 		return
 	}
 
+	cols := attrlens(r.Items)
+	var cstr string
+	for _, c := range cols {
+		cstr = cstr + " | " + pad(c.Name, c.MaxLen, " ")
+	}
+	cstr = cstr + " |"
+	cstr = strings.TrimSpace(cstr)
+	border := pad("", len(cstr), "-")
+	fmt.Fprintf(os.Stdout, "%v\n", border)
+	fmt.Fprintf(os.Stdout, "%v\n", cstr)
+	fmt.Fprintf(os.Stdout, "%v\n", border)
 	for _, i := range r.Items {
-		fmt.Fprintf(os.Stdout, "%v:", i.Name)
-		for _, a := range i.Attributes {
-			fmt.Fprintf(os.Stdout, " %v=%v", a.Name, a.Value)
+		fmt.Fprintf(os.Stdout, "| %v |", pad(i.Name, cols[0].MaxLen, " "))
+		for k, a := range i.Attributes {
+			fmt.Fprintf(os.Stdout, " %v |", pad(a.Value, cols[k+1].MaxLen, " "))
 		}
 		fmt.Fprintln(os.Stdout, "")
 	}
+	fmt.Fprintf(os.Stdout, "%v\n", border)
 }
 
 func sdbcli(c *cli.Context) {
@@ -105,12 +167,15 @@ func sdbcli(c *cli.Context) {
 		os.Stdout.WriteString("secret: AWS Secret Key ID is not set\n")
 		return
 	}
-	db = sdb.NewSimpleDB(c.String("accessKey"), c.String("secretKey"), sdb.SDB_REGION_EU_WEST_1)
+
+	db = sdb.NewSimpleDB(c.String("accessKey"), c.String("secretKey"), sdb.SDBRegionEUWest1)
+
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print("> ")
 	for scanner.Scan() {
 		s := scanner.Text()
-		if s == "x" {
+		s = strings.TrimSpace(s)
+		if s == "q" {
 			exit()
 		}
 		if s == "ls" {
@@ -119,7 +184,7 @@ func sdbcli(c *cli.Context) {
 		if s == "" {
 			printHelp()
 		}
-		if strings.Index(s, "c ") == 0 {
+		if strings.Index(s, "create ") == 0 {
 			sp := strings.Split(s, " ")
 			if len(sp) == 2 {
 				createDomain(sp[1])
@@ -127,10 +192,26 @@ func sdbcli(c *cli.Context) {
 				fmt.Fprintln(os.Stdout, "syntax error, no name found")
 			}
 		}
-		if strings.Index(s, "del ") == 0 {
+		if strings.Index(s, "meta ") == 0 {
 			sp := strings.Split(s, " ")
 			if len(sp) == 2 {
-				deleteDomain(sp[1])
+				metaDomain(sp[1])
+			} else {
+				fmt.Fprintln(os.Stdout, "syntax error, no name found")
+			}
+		}
+		if strings.Index(s, "drop ") == 0 {
+			sp := strings.Split(s, " ")
+			if len(sp) == 2 {
+				dropDomain(sp[1])
+			} else {
+				fmt.Fprintln(os.Stdout, "syntax error, no name found")
+			}
+		}
+		if strings.Index(s, "delete ") == 0 {
+			sp := strings.Split(s, " ")
+			if len(sp) == 3 {
+				deleteItem(sp[1], sp[2])
 			} else {
 				fmt.Fprintln(os.Stdout, "syntax error, no name found")
 			}
