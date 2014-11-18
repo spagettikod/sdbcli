@@ -170,6 +170,11 @@ func sdbcli(c *cli.Context) {
 
 	db = sdb.NewSimpleDB(c.String("accessKey"), c.String("secretKey"), sdb.SDBRegionEUWest1)
 
+	if c.String("port") != "" {
+		listen(c.String("port"))
+		return
+	}
+
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Print("> ")
 	for scanner.Scan() {
@@ -246,6 +251,10 @@ func main() {
 			Name:   "secretKey, s",
 			Usage:  "AWS Secret Key ID",
 			EnvVar: "AWS_SECRET_ACCESS_KEY",
+		},
+		cli.StringFlag{
+			Name:  "port, p",
+			Usage: "SimpleDB web app port number",
 		},
 	}
 	app.RunAndExitOnError()
