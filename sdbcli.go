@@ -3,11 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/codegangsta/cli"
-	"github.com/spagettikod/sdb"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/codegangsta/cli"
+	"github.com/spagettikod/sdb"
 )
 
 var (
@@ -250,7 +251,7 @@ func main() {
 		cli.StringFlag{
 			Name:   "secretKey, s",
 			Usage:  "AWS Secret Key ID",
-			EnvVar: "AWS_SECRET_ACCESS_KEY",
+			EnvVar: "AWS_SECRET_KEY",
 		},
 		cli.StringFlag{
 			Name:  "port, p",
